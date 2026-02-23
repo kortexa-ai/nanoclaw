@@ -23,6 +23,7 @@ export interface IpcDeps {
     availableGroups: AvailableGroup[],
     registeredJids: Set<string>,
   ) => void;
+  triggerSelfUpdate?: () => Promise<void>;
 }
 
 let ipcWatcherRunning = false;
@@ -382,6 +383,15 @@ export async function processTaskIpc(
           'Invalid register_group request - missing required fields',
         );
       }
+      break;
+
+    case 'self_update':
+      // Only main group can trigger self-update
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized self_update attempt blocked');
+        break;
+      }
+      await deps.triggerSelfUpdate?.();
       break;
 
     default:

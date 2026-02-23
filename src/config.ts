@@ -68,6 +68,9 @@ export const SSH_FLEET_CONFIG_PATH = path.resolve(DATA_DIR, 'ssh-fleet.json');
 export const FLEET_SSH_IDENTITY = process.env.FLEET_SSH_IDENTITY || 'id_pi_cluster';
 export const FLEET_REDISCOVERY_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
+// Self-update check interval
+export const UPDATE_CHECK_INTERVAL = 30 * 60 * 1000; // 30 minutes
+
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =

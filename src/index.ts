@@ -10,6 +10,7 @@ import {
   POLL_INTERVAL,
   STORE_DIR,
   TRIGGER_PATTERN,
+  UPDATE_CHECK_INTERVAL,
 } from './config.js';
 import './channels/index.js';
 import {
@@ -77,6 +78,8 @@ const channels: Channel[] = [];
 const queue = new GroupQueue();
 let discoveryWorkerRunning = false;
 let rediscoveryTimer: ReturnType<typeof setInterval> | null = null;
+let updateWorkerRunning = false;
+let updateCheckTimer: ReturnType<typeof setInterval> | null = null;
 
 function forkDiscoveryWorker(): void {
   if (discoveryWorkerRunning) {
@@ -100,6 +103,74 @@ function forkDiscoveryWorker(): void {
         }
       } else {
         logger.error({ code }, 'Fleet discovery worker exited with error');
+      }
+    });
+  });
+}
+
+function triggerSelfUpdate(): void {
+  if (updateWorkerRunning) {
+    logger.debug('Update worker already running, skipping');
+    return;
+  }
+  updateWorkerRunning = true;
+
+  import('child_process').then(({ fork }) => {
+    const child = fork(
+      new URL('./self-update-worker.js', import.meta.url).pathname,
+      [], { silent: true },
+    );
+
+    let output = '';
+    child.stdout?.on('data', (data: Buffer) => {
+      output += data.toString();
+    });
+    child.stderr?.on('data', (data: Buffer) => {
+      logger.warn({ stderr: data.toString().trim() }, 'Self-update worker stderr');
+    });
+
+    child.on('exit', async (code) => {
+      updateWorkerRunning = false;
+
+      if (code !== 0) {
+        logger.error({ code }, 'Self-update worker failed');
+        // Notify main group about failure
+        try {
+          const mainJid = Object.entries(registeredGroups)
+            .find(([, g]) => g.folder === MAIN_GROUP_FOLDER)?.[0];
+          if (mainJid && ipcDeps) {
+            await ipcDeps.sendMessage(mainJid, `Self-update failed (exit code ${code})`);
+          }
+        } catch { /* best effort */ }
+        return;
+      }
+
+      try {
+        const result = JSON.parse(output.trim());
+        if (result.updated) {
+          logger.info(
+            { oldRev: result.oldRev?.slice(0, 7), newRev: result.newRev?.slice(0, 7) },
+            'Self-update successful, restarting',
+          );
+          // Notify main group before restart
+          const mainJid = Object.entries(registeredGroups)
+            .find(([, g]) => g.folder === MAIN_GROUP_FOLDER)?.[0];
+          if (mainJid && ipcDeps) {
+            const summary = result.summary
+              ? result.summary.split('\n').map((l: string) => `- ${l}`).join('\n')
+              : '';
+            await ipcDeps.sendMessage(
+              mainJid,
+              `Updated from \`${result.oldRev?.slice(0, 7)}\` to \`${result.newRev?.slice(0, 7)}\`:\n${summary}`,
+            );
+          }
+          // Exit — systemd/launchd restarts with new code
+          process.exit(0);
+        } else {
+          logger.debug('Already up to date');
+        }
+      } catch (err) {
+        logger.error({ err, output }, 'Failed to parse self-update result');
       }
     });
   });
@@ -552,6 +623,12 @@ async function main(): Promise<void> {
     }, FLEET_REDISCOVERY_INTERVAL);
   }
 
+  // Periodic self-update check
+  updateCheckTimer = setInterval(() => {
+    logger.debug('Checking for updates');
+    triggerSelfUpdate();
+  }, UPDATE_CHECK_INTERVAL);
+
   initDatabase();
   logger.info('Database initialized');
   loadState();
@@ -560,6 +637,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
     if (rediscoveryTimer) clearInterval(rediscoveryTimer);
+    if (updateCheckTimer) clearInterval(updateCheckTimer);
     stopHealthChecks();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
