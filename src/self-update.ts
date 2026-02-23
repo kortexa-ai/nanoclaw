@@ -46,7 +46,8 @@ export async function selfUpdate(): Promise<SelfUpdateResult> {
   run(`git pull origin ${branch} --ff-only`);
 
   // Install deps in case they changed (include devDeps — typescript is needed for build)
-  run('npm install');
+  // --production=false overrides NODE_ENV=production set by systemd
+  run('npm install --production=false');
 
   // Rebuild
   run('npm run build');
