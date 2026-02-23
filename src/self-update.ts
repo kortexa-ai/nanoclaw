@@ -38,8 +38,8 @@ export async function selfUpdate(): Promise<SelfUpdateResult> {
   // Fast-forward only — fails if working tree is dirty
   run(`git pull origin ${branch} --ff-only`);
 
-  // Install deps in case they changed
-  run('npm install --omit=dev');
+  // Install deps in case they changed (include devDeps — typescript is needed for build)
+  run('npm install');
 
   // Rebuild
   run('npm run build');
