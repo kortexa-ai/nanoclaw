@@ -6,6 +6,7 @@ import {
   ASSISTANT_NAME,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
+  STORE_DIR,
   TRIGGER_PATTERN,
 } from './config.js';
 import './channels/index.js';
