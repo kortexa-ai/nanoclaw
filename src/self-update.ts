@@ -11,11 +11,18 @@ export interface SelfUpdateResult {
 
 const EXEC_TIMEOUT = 120_000; // 2 minutes per command
 
+// Ensure node/npm binaries are on PATH (nvm sets this for the login shell
+// but execSync uses /bin/sh which may not inherit it)
+const execPath = process.execPath; // e.g. /home/pi/.nvm/versions/node/v25.0.0/bin/node
+const nodeBin = execPath.replace(/\/node$/, '');
+const envPath = `${nodeBin}:${process.env.PATH || '/usr/local/bin:/usr/bin:/bin'}`;
+
 function run(cmd: string): string {
   return execSync(cmd, {
     cwd: process.cwd(),
     timeout: EXEC_TIMEOUT,
     encoding: 'utf-8',
+    env: { ...process.env, PATH: envPath },
   }).trim();
 }
 
