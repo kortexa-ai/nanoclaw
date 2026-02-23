@@ -45,7 +45,9 @@ export async function selfUpdate(): Promise<SelfUpdateResult> {
 
   log(`Update available: ${localRev.slice(0, 7)} → ${remoteRev.slice(0, 7)}`);
 
-  // Fast-forward only — fails if working tree is dirty
+  // Discard local changes (deployment = git is source of truth)
+  // npm install can dirty package-lock.json, build can dirty dist/, etc.
+  run('git reset --hard HEAD');
   run(`git pull origin ${branch} --ff-only`);
 
   // Install deps in case they changed (include devDeps — typescript is needed for build)

@@ -64,7 +64,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=${REMOTE_DIR}
 ExecStart=${NODE_BIN}/node ${REMOTE_DIR}/dist/index.js
-Restart=on-failure
+Restart=always
 RestartSec=5
 Environment=HOME=/home/pi
 Environment=PATH=${NODE_BIN}:/usr/local/bin:/usr/bin:/bin
