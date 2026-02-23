@@ -6,17 +6,20 @@
 #   1. From the dev machine:  ./scripts/self-wipe.sh
 #   2. By the orchestrator:   bash scripts/self-wipe.sh
 #
-# Reads ~/.ssh/config to find fleet nodes (same discovery as ssh-discover.ts).
+# Reads data/ssh-fleet.json for the list of provisioned nodes.
 # Wipes agent-only nodes first, then the orchestrator (self) last.
 #
 # THIS IS IRREVERSIBLE. The claw eats itself.
 #
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+FLEET_CONFIG="$PROJECT_DIR/data/ssh-fleet.json"
+
 REMOTE_DIR="/home/pi/nanoclaw"
 WORKSPACE_DIR="/home/pi/nanoclaw-workspace"
 SERVICE_NAME="nanoclaw.service"
-FLEET_SSH_IDENTITY="id_pi_cluster"
 
 # Colors
 RED='\033[0;31m'
@@ -28,25 +31,20 @@ log()  { echo -e "${GREEN}[wipe]${NC} $*"; }
 warn() { echo -e "${YELLOW}[wipe]${NC} $*"; }
 err()  { echo -e "${RED}[wipe]${NC} $*"; }
 
-# --- Discover fleet nodes from SSH config ---
+# --- Read fleet nodes from ssh-fleet.json ---
 discover_fleet_hosts() {
-  local ssh_config="$HOME/.ssh/config"
-  if [[ ! -f "$ssh_config" ]]; then
-    warn "No SSH config found, only wiping local"
+  if [[ ! -f "$FLEET_CONFIG" ]]; then
+    warn "No fleet config at $FLEET_CONFIG"
     return
   fi
 
-  # Parse hosts that use the fleet identity key
-  # (same logic as ssh-discover.ts parseSshConfig)
-  awk '
-    /^[Hh]ost / {
-      # Flush previous block
-      if (has_fleet_key && host != "" && host !~ /[*?]/) print host
-      host = $2; has_fleet_key = 0
+  # Extract user@host for each node (jq-free — works on minimal Pi installs)
+  node -e "
+    const cfg = JSON.parse(require('fs').readFileSync('$FLEET_CONFIG', 'utf-8'));
+    for (const n of cfg.nodes || []) {
+      console.log((n.user || 'pi') + '@' + n.host);
     }
-    /IdentityFile.*'"$FLEET_SSH_IDENTITY"'/ { has_fleet_key = 1 }
-    END { if (has_fleet_key && host != "" && host !~ /[*?]/) print host }
-  ' "$ssh_config"
+  " 2>/dev/null || warn "Failed to parse fleet config"
 }
 
 # --- Wipe a remote node ---
@@ -109,11 +107,11 @@ WIPE_SCRIPT
 SELF_HOST=$(hostname 2>/dev/null || echo "unknown")
 log "Starting fleet wipe from ${SELF_HOST}"
 
-# Discover all fleet hosts
+# Get all fleet hosts
 FLEET_HOSTS=$(discover_fleet_hosts)
 
 if [[ -z "$FLEET_HOSTS" ]]; then
-  warn "No fleet hosts discovered, wiping local only"
+  warn "No fleet hosts found, wiping local only"
 fi
 
 # Wipe remote (agent-only) nodes first, skip self
