@@ -1,5 +1,6 @@
 import { ChildProcess } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -47,6 +48,7 @@ import { resolveGroupFolderPath } from './group-folder.js';
 import { IpcDeps, processIpcPayload, startIpcWatcher } from './ipc.js';
 import { IpcPayload } from './ipc-protocol.js';
 import {
+  getFleetConfig,
   loadFleetConfig,
   selectNode,
   startHealthChecks,
@@ -80,6 +82,7 @@ let discoveryWorkerRunning = false;
 let rediscoveryTimer: ReturnType<typeof setInterval> | null = null;
 let updateWorkerRunning = false;
 let updateCheckTimer: ReturnType<typeof setInterval> | null = null;
+let statusHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
 function forkDiscoveryWorker(): void {
   if (discoveryWorkerRunning) {
@@ -657,6 +660,7 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    if (statusHeartbeatTimer) clearInterval(statusHeartbeatTimer);
     if (rediscoveryTimer) clearInterval(rediscoveryTimer);
     if (updateCheckTimer) clearInterval(updateCheckTimer);
     stopHealthChecks();
@@ -696,6 +700,12 @@ async function main(): Promise<void> {
       isGroup?: boolean,
     ) => storeChatMetadata(chatJid, timestamp, name, channel, isGroup),
     registeredGroups: () => registeredGroups,
+    onCommand: (action: string) => {
+      logger.info({ action }, 'Command received via MQTT');
+      if (action === 'self_update') triggerSelfUpdate();
+      else if (action === 'fleet_wipe') triggerFleetWipe();
+      else logger.warn({ action }, 'Unknown command action');
+    },
   };
 
   // Create and connect all registered channels.
@@ -762,6 +772,27 @@ async function main(): Promise<void> {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);
   });
+
+  // Status heartbeat — publish enriched status to MQTT every 30s
+  const pkgVersion = JSON.parse(
+    fs.readFileSync(new URL('../package.json', import.meta.url), 'utf-8'),
+  ).version as string;
+
+  const publishStatusHeartbeat = () => {
+    const fleet = getFleetConfig();
+    mqtt.publishStatus({
+      status: 'online',
+      hostname: os.hostname(),
+      version: pkgVersion,
+      uptime: Math.floor(process.uptime()),
+      fleetNodes: fleet?.nodes.length ?? 0,
+      activeAgents: queue.activeAgentCount,
+      fleet: fleet?.nodes ?? [],
+    });
+  };
+
+  publishStatusHeartbeat(); // Immediate first publish
+  statusHeartbeatTimer = setInterval(publishStatusHeartbeat, 30_000);
 }
 
 // Guard: only run when executed directly, not when imported by tests

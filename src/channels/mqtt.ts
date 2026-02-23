@@ -19,11 +19,13 @@ export interface MqttChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  onCommand?: (action: string) => void;
 }
 
 const TOPIC_IN = 'nanoclaw/in';
 const TOPIC_OUT = 'nanoclaw/out';
 const TOPIC_STATUS = 'nanoclaw/status';
+const TOPIC_CMD = 'nanoclaw/cmd';
 const JID = 'mqtt:local';
 
 export class MqttChannel implements Channel {
@@ -45,8 +47,23 @@ export class MqttChannel implements Channel {
     this.server = createServer(this.aedes.handle);
 
     this.aedes.on('publish', (packet: AedesPublishPacket, client: Client | null) => {
-      // Ignore internal broker messages (no client) and non-inbound topics
-      if (!client || packet.topic !== TOPIC_IN) return;
+      // Ignore internal broker messages (no client)
+      if (!client) return;
+
+      // Handle command topic
+      if (packet.topic === TOPIC_CMD) {
+        try {
+          const cmd = JSON.parse(packet.payload.toString('utf-8'));
+          if (cmd.action && this.opts.onCommand) {
+            this.opts.onCommand(cmd.action);
+          }
+        } catch {
+          logger.warn('Malformed command on nanoclaw/cmd');
+        }
+        return;
+      }
+
+      if (packet.topic !== TOPIC_IN) return;
 
       const content = packet.payload.toString('utf-8').trim();
       if (!content) return;
@@ -180,6 +197,10 @@ export class MqttChannel implements Channel {
     }
 
     logger.info('MQTT broker stopped');
+  }
+
+  publishStatus(data: Record<string, unknown>): void {
+    this.publishRetained(TOPIC_STATUS, JSON.stringify(data));
   }
 
   private publishRetained(topic: string, payload: string): void {
