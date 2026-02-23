@@ -45,6 +45,13 @@ npm install --production=false 2>&1 | tail -3
 echo "==> npm run build"
 npm run build 2>&1 | tail -5
 
+# --- Build agent-runner (MCP tools for SSH agents) ---
+echo "==> Building agent-runner"
+cd "${REMOTE_DIR}/ssh/agent-runner"
+npm install --production=false 2>&1 | tail -3
+npm run build 2>&1 | tail -5
+cd "${REMOTE_DIR}"
+
 # --- Create directories ---
 mkdir -p "${REMOTE_DIR}/logs"
 mkdir -p "${REMOTE_DIR}/store"
