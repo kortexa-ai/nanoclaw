@@ -1,7 +1,5 @@
 import { execSync } from 'child_process';
 
-import { logger } from './logger.js';
-
 export interface SelfUpdateResult {
   updated: boolean;
   oldRev?: string;
@@ -26,9 +24,14 @@ function run(cmd: string): string {
   }).trim();
 }
 
+// Log to stderr so stdout stays clean for JSON result
+function log(msg: string): void {
+  console.error(`[self-update] ${msg}`);
+}
+
 export async function selfUpdate(): Promise<SelfUpdateResult> {
   const branch = run('git branch --show-current');
-  logger.info({ branch }, 'Checking for updates');
+  log(`Checking for updates on ${branch}`);
 
   run('git fetch origin');
 
@@ -36,11 +39,11 @@ export async function selfUpdate(): Promise<SelfUpdateResult> {
   const remoteRev = run(`git rev-parse origin/${branch}`);
 
   if (localRev === remoteRev) {
-    logger.info('Already up to date');
+    log('Already up to date');
     return { updated: false };
   }
 
-  logger.info({ localRev: localRev.slice(0, 7), remoteRev: remoteRev.slice(0, 7) }, 'Update available, pulling');
+  log(`Update available: ${localRev.slice(0, 7)} → ${remoteRev.slice(0, 7)}`);
 
   // Fast-forward only — fails if working tree is dirty
   run(`git pull origin ${branch} --ff-only`);
@@ -54,7 +57,7 @@ export async function selfUpdate(): Promise<SelfUpdateResult> {
 
   const summary = run(`git log --oneline ${localRev}..${remoteRev}`);
 
-  logger.info({ oldRev: localRev.slice(0, 7), newRev: remoteRev.slice(0, 7) }, 'Self-update complete');
+  log(`Self-update complete: ${localRev.slice(0, 7)} → ${remoteRev.slice(0, 7)}`);
 
   return {
     updated: true,
