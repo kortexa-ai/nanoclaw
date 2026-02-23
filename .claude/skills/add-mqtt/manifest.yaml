@@ -1,0 +1,16 @@
+skill: mqtt
+version: 1.0.0
+description: "Embedded MQTT broker + channel for local communication"
+core_version: 0.1.0
+adds:
+  - src/channels/mqtt.ts
+modifies:
+  - src/index.ts
+  - src/config.ts
+structured:
+  npm_dependencies:
+    aedes: "^0.51.3"
+  env_additions:
+    - MQTT_PORT
+conflicts: []
+depends: []
