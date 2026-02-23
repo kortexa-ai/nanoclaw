@@ -274,6 +274,54 @@ Use available_groups.json to find the JID for a group. The folder name should be
   },
 );
 
+server.tool(
+  'self_update',
+  'Trigger a self-update of the orchestrator. Pulls latest code from git, rebuilds, and restarts. Main group only.',
+  {},
+  async () => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can trigger self-update.' }],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'self_update',
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: 'Self-update triggered. The orchestrator will pull, build, and restart.' }] };
+  },
+);
+
+server.tool(
+  'self_wipe',
+  'Wipe the entire fleet — removes nanoclaw from all nodes and the orchestrator. DESTRUCTIVE. Main group only. Ask for confirmation before running.',
+  {},
+  async () => {
+    if (!isMain) {
+      return {
+        content: [{ type: 'text' as const, text: 'Only the main group can trigger self-wipe.' }],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'self_wipe',
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: 'Fleet wipe triggered. All nodes will be wiped.' }] };
+  },
+);
+
 // Start the stdio transport
 const transport = new StdioServerTransport();
 await server.connect(transport);
