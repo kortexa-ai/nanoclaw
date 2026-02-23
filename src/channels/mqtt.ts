@@ -1,7 +1,11 @@
 import aedes from 'aedes';
 import type { AedesPublishPacket, Client } from 'aedes';
 const { createBroker } = aedes;
+import fs from 'fs';
+import { createServer as createHttpsServer } from 'https';
 import { createServer, Server } from 'net';
+import path from 'path';
+import { WebSocketServer, createWebSocketStream, type WebSocket } from 'ws';
 
 import { logger } from '../logger.js';
 import {
@@ -27,6 +31,7 @@ export class MqttChannel implements Channel {
 
   private aedes: ReturnType<typeof createBroker> | null = null;
   private server: Server | null = null;
+  private wsServer: WebSocketServer | null = null;
   private port: number;
   private opts: MqttChannelOpts;
 
@@ -77,10 +82,31 @@ export class MqttChannel implements Channel {
 
     return new Promise<void>((resolve, reject) => {
       this.server!.listen(this.port, () => {
+        // WebSocket transport on port+1 (same Aedes broker, for browser clients)
+        // Uses WSS if TLS certs are found, plain WS otherwise.
+        const wsPort = this.port + 1;
+        const tls = loadTlsCerts();
+        let wsProto: string;
+
+        if (tls) {
+          const httpsServer = createHttpsServer(tls);
+          this.wsServer = new WebSocketServer({ server: httpsServer });
+          httpsServer.listen(wsPort);
+          wsProto = 'wss';
+        } else {
+          this.wsServer = new WebSocketServer({ port: wsPort });
+          wsProto = 'ws';
+        }
+
+        this.wsServer.on('connection', (ws: WebSocket) => {
+          const stream = createWebSocketStream(ws);
+          this.aedes!.handle(stream);
+        });
+
         // Publish retained online status
         this.publishRetained(TOPIC_STATUS, JSON.stringify({ status: 'online' }));
-        logger.info({ port: this.port }, 'MQTT broker listening');
-        console.log(`\n  MQTT broker: port ${this.port}`);
+        logger.info({ port: this.port, wsPort, wsProto }, 'MQTT broker listening');
+        console.log(`\n  MQTT broker: port ${this.port} (tcp), ${wsPort} (${wsProto})`);
         console.log(`  Send:    mosquitto_pub -t ${TOPIC_IN} -m "hello"`);
         console.log(`  Listen:  mosquitto_sub -t ${TOPIC_OUT}\n`);
         resolve();
@@ -135,6 +161,15 @@ export class MqttChannel implements Channel {
       });
     }
 
+    if (this.wsServer) {
+      await new Promise<void>((resolve) => {
+        this.wsServer!.close(() => {
+          this.wsServer = null;
+          resolve();
+        });
+      });
+    }
+
     if (this.server) {
       await new Promise<void>((resolve) => {
         this.server!.close(() => {
@@ -161,4 +196,38 @@ export class MqttChannel implements Channel {
       () => {},
     );
   }
+}
+
+/**
+ * Look for TLS certs for the WSS listener.
+ * Checks env vars first, then a conventional path in the data dir.
+ * Returns null if no certs found (falls back to plain WS).
+ */
+function loadTlsCerts(): { key: Buffer; cert: Buffer } | null {
+  // Env var paths take priority
+  const keyPath = process.env.MQTT_TLS_KEY;
+  const certPath = process.env.MQTT_TLS_CERT;
+  if (keyPath && certPath) {
+    try {
+      return { key: fs.readFileSync(keyPath), cert: fs.readFileSync(certPath) };
+    } catch (err) {
+      logger.warn({ err, keyPath, certPath }, 'TLS certs specified but unreadable, falling back to ws://');
+      return null;
+    }
+  }
+
+  // Convention: data/tls/mqtt.key + data/tls/mqtt.crt
+  const dataDir = path.resolve(process.cwd(), 'data', 'tls');
+  const defaultKey = path.join(dataDir, 'mqtt.key');
+  const defaultCert = path.join(dataDir, 'mqtt.crt');
+  if (fs.existsSync(defaultKey) && fs.existsSync(defaultCert)) {
+    try {
+      return { key: fs.readFileSync(defaultKey), cert: fs.readFileSync(defaultCert) };
+    } catch (err) {
+      logger.warn({ err }, 'TLS certs found but unreadable, falling back to ws://');
+      return null;
+    }
+  }
+
+  return null;
 }
