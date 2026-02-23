@@ -29,6 +29,7 @@ if [ -d "${REMOTE_DIR}/.git" ]; then
   echo "==> Updating existing repo"
   cd "${REMOTE_DIR}"
   git fetch origin
+  git reset --hard HEAD
   git checkout "${BRANCH}"
   git reset --hard "origin/${BRANCH}"
 else
