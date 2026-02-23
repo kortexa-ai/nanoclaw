@@ -24,6 +24,7 @@ export interface IpcDeps {
     registeredJids: Set<string>,
   ) => void;
   triggerSelfUpdate?: () => Promise<void>;
+  triggerFleetWipe?: () => Promise<void>;
 }
 
 let ipcWatcherRunning = false;
@@ -392,6 +393,15 @@ export async function processTaskIpc(
         break;
       }
       await deps.triggerSelfUpdate?.();
+      break;
+
+    case 'self_wipe':
+      // Only main group can trigger fleet wipe
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized self_wipe attempt blocked');
+        break;
+      }
+      await deps.triggerFleetWipe?.();
       break;
 
     default:

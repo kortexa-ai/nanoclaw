@@ -176,6 +176,27 @@ function triggerSelfUpdate(): void {
   });
 }
 
+function triggerFleetWipe(): void {
+  logger.warn('Fleet wipe triggered — wiping all nodes and self');
+
+  import('child_process').then(({ spawn }) => {
+    const scriptPath = new URL('../scripts/self-wipe.sh', import.meta.url).pathname;
+    const child = spawn('bash', [scriptPath], {
+      stdio: 'inherit',
+      detached: true,
+    });
+    // Detach so the wipe script survives if we die mid-way
+    child.unref();
+
+    // Notify main group (best effort — we might be dead before it sends)
+    const mainJid = Object.entries(registeredGroups)
+      .find(([, g]) => g.folder === MAIN_GROUP_FOLDER)?.[0];
+    if (mainJid && ipcDeps) {
+      ipcDeps.sendMessage(mainJid, 'Fleet wipe initiated. Goodbye.').catch(() => {});
+    }
+  });
+}
+
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
   const agentTs = getRouterState('last_agent_timestamp');
