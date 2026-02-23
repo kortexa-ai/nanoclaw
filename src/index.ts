@@ -49,6 +49,7 @@ import {
   stopHealthChecks,
 } from './ssh-fleet.js';
 import { runSshAgent } from './ssh-runner.js';
+import { discoverAndProvisionFleet, parseSshConfig } from './ssh-discover.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   isSenderAllowed,
@@ -492,18 +493,27 @@ function ensureContainerSystemRunning(): void {
 async function main(): Promise<void> {
   // Load SSH fleet config before runtime check (affects which runtime is used)
   loadFleetConfig();
-  const runtimeMode = detectRuntimeMode();
+  let runtimeMode = detectRuntimeMode();
   logger.info({ runtimeMode }, 'Runtime mode detected');
 
-  ensureContainerSystemRunning();
+  if (runtimeMode === 'docker') {
+    const fleetCandidates = parseSshConfig();  // fast — just reads a file
+    if (fleetCandidates.length > 0) {
+      // Fleet candidates found in SSH config — skip Docker, start async discovery
+      logger.info({ candidates: fleetCandidates.length }, 'Fleet candidates in SSH config, starting auto-discovery');
+      discoverAndProvisionFleet().catch((err) => {
+        logger.error({ err }, 'Fleet auto-discovery failed (non-fatal)');
+      });
+    } else {
+      ensureContainerSystemRunning();  // Docker required (existing behavior)
+    }
+  } else {
+    startHealthChecks();  // existing behavior
+  }
+
   initDatabase();
   logger.info('Database initialized');
   loadState();
-
-  // Start SSH fleet health checks if configured
-  if (runtimeMode === 'ssh') {
-    startHealthChecks();
-  }
 
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
