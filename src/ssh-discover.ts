@@ -238,10 +238,22 @@ export async function discoverAndProvisionFleet(): Promise<void> {
   }
 
   logger.info({ count: candidates.length }, 'Fleet candidates found');
-  const probed = probeCandidates(candidates);
-  if (probed.length === 0) {
+  const probedRaw = probeCandidates(candidates);
+  if (probedRaw.length === 0) {
     logger.warn('No fleet candidates reachable');
     return;
+  }
+
+  // Deduplicate by remoteHostname — SSH config may have multiple aliases for the same host
+  const seenHosts = new Map<string, ProbedCandidate>();
+  for (const c of probedRaw) {
+    if (!seenHosts.has(c.remoteHostname)) {
+      seenHosts.set(c.remoteHostname, c);
+    }
+  }
+  const probed = [...seenHosts.values()];
+  if (probed.length < probedRaw.length) {
+    logger.info({ before: probedRaw.length, after: probed.length }, 'Deduplicated fleet candidates');
   }
 
   // Get repo URL and branch from local git
