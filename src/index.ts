@@ -500,10 +500,24 @@ async function main(): Promise<void> {
   if (runtimeMode === 'docker') {
     const fleetCandidates = parseSshConfig();  // fast — just reads a file
     if (fleetCandidates.length > 0) {
-      // Fleet candidates found in SSH config — skip Docker, start async discovery
+      // Fleet candidates found in SSH config — skip Docker, start async discovery.
+      // Runs in a child process to avoid blocking the event loop (probing uses execSync).
       logger.info({ candidates: fleetCandidates.length }, 'Fleet candidates in SSH config, starting auto-discovery');
-      discoverAndProvisionFleet().catch((err) => {
-        logger.error({ err }, 'Fleet auto-discovery failed (non-fatal)');
+      import('child_process').then(({ fork }) => {
+        const child = fork(new URL('./ssh-discover-worker.js', import.meta.url).pathname, [], { stdio: 'inherit' });
+        child.on('exit', (code) => {
+          if (code === 0) {
+            // Reload fleet config after successful discovery
+            loadFleetConfig();
+            const newMode = detectRuntimeMode();
+            if (newMode === 'ssh') {
+              startHealthChecks();
+              logger.info('Fleet auto-discovery complete, switched to SSH runtime');
+            }
+          } else {
+            logger.error({ code }, 'Fleet auto-discovery worker exited with error');
+          }
+        });
       });
     } else {
       ensureContainerSystemRunning();  // Docker required (existing behavior)
