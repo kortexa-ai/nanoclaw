@@ -1,4 +1,6 @@
-import { createBroker, type AedesPublishPacket, type Client } from 'aedes';
+import aedes from 'aedes';
+import type { AedesPublishPacket, Client } from 'aedes';
+const { createBroker } = aedes;
 import { createServer, Server } from 'net';
 
 import { logger } from '../logger.js';
