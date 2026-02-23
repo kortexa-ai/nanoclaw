@@ -57,8 +57,8 @@ wipe_remote() {
     return
   fi
 
-  ssh "${host}" bash -s "${REMOTE_DIR}" "${WORKSPACE_DIR}" "${SERVICE_NAME}" <<'WIPE_SCRIPT'
-set -euo pipefail
+  ssh "${host}" bash -s "${REMOTE_DIR}" "${WORKSPACE_DIR}" "${SERVICE_NAME}" <<'WIPE_SCRIPT' || { warn "SSH to ${host} failed mid-wipe, continuing"; return; }
+set -uo pipefail
 
 REMOTE_DIR="$1"
 WORKSPACE_DIR="$2"
@@ -83,8 +83,10 @@ if [[ -f "$UNIT_FILE" ]]; then
   systemctl --user daemon-reload 2>/dev/null || true
 fi
 
-# Kill any lingering node processes from nanoclaw
-pkill -f "nanoclaw" 2>/dev/null || true
+# Kill any lingering nanoclaw node processes (match the dist/index.js entry point
+# specifically — a bare "nanoclaw" pattern would match this SSH session itself)
+pkill -f "node.*nanoclaw/dist/index.js" 2>/dev/null || true
+pkill -f "node.*nanoclaw/ssh/agent-runner" 2>/dev/null || true
 
 # Remove repo and workspace
 if [[ -d "$REMOTE_DIR" ]]; then
