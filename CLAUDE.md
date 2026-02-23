@@ -13,19 +13,26 @@ Single Node.js process with skill-based channel system. Channels (WhatsApp, Tele
 | `src/index.ts` | Orchestrator: state, message loop, agent invocation |
 | `src/channels/registry.ts` | Channel registry (self-registration at startup) |
 | `src/ipc.ts` | IPC watcher and task processing |
+| `src/ipc-protocol.ts` | Shared IPC marker constants and types |
 | `src/router.ts` | Message formatting and outbound routing |
 | `src/config.ts` | Trigger pattern, paths, intervals |
-| `src/container-runner.ts` | Spawns agent containers with mounts |
+| `src/container-runner.ts` | Spawns agents in Docker containers |
+| `src/container-runtime.ts` | Runtime abstraction (Docker vs SSH) |
+| `src/ssh-runner.ts` | Spawns agents on SSH fleet nodes |
+| `src/ssh-fleet.ts` | SSH fleet registry, health checks, scheduling |
 | `src/task-scheduler.ts` | Runs scheduled tasks |
 | `src/db.ts` | SQLite operations |
 | `groups/{name}/CLAUDE.md` | Per-group memory (isolated) |
+| `ssh/agent-runner/` | SSH fleet agent runner (stdio IPC) |
 | `container/skills/agent-browser.md` | Browser automation tool (available to all agents via Bash) |
+| `data/ssh-fleet.json` | SSH fleet config (created by `/setup-pi-fleet`) |
 
 ## Skills
 
 | Skill | When to Use |
 |-------|-------------|
 | `/setup` | First-time installation, authentication, service configuration |
+| `/setup-pi-fleet` | Add Raspberry Pis as agent execution nodes |
 | `/customize` | Adding channels, integrations, changing behavior |
 | `/debug` | Container issues, logs, troubleshooting |
 | `/update-nanoclaw` | Bring upstream NanoClaw updates into a customized install |

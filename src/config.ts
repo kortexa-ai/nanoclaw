@@ -63,6 +63,9 @@ export const TRIGGER_PATTERN = new RegExp(
   'i',
 );
 
+// SSH fleet config
+export const SSH_FLEET_CONFIG_PATH = path.resolve(DATA_DIR, 'ssh-fleet.json');
+
 // Timezone for scheduled tasks (cron expressions, etc.)
 // Uses system timezone by default
 export const TIMEZONE =

@@ -1,3 +1,4 @@
+import { ChildProcess } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -37,9 +38,17 @@ import {
   storeChatMetadata,
   storeMessage,
 } from './db.js';
-import { GroupQueue } from './group-queue.js';
+import { GroupQueue, IpcHandlers } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
-import { startIpcWatcher } from './ipc.js';
+import { IpcDeps, processIpcPayload, startIpcWatcher } from './ipc.js';
+import { IpcPayload } from './ipc-protocol.js';
+import {
+  loadFleetConfig,
+  selectNode,
+  startHealthChecks,
+  stopHealthChecks,
+} from './ssh-fleet.js';
+import { runSshAgent } from './ssh-runner.js';
 import { findChannel, formatMessages, formatOutbound } from './router.js';
 import {
   isSenderAllowed,
@@ -300,6 +309,19 @@ async function runAgent(
       }
     : undefined;
 
+  // Determine runtime mode
+  const mode = detectRuntimeMode();
+  const isSshMode = mode === 'ssh';
+
+  const containerInput = {
+    prompt,
+    sessionId,
+    groupFolder: group.folder,
+    chatJid,
+    isMain,
+    assistantName: ASSISTANT_NAME,
+  };
+
   try {
     const output = await runContainerAgent(
       group,
@@ -324,7 +346,7 @@ async function runAgent(
     if (output.status === 'error') {
       logger.error(
         { group: group.name, error: output.error },
-        'Container agent error',
+        'Agent error',
       );
       return 'error';
     }
@@ -455,20 +477,38 @@ function recoverPendingMessages(): void {
   }
 }
 
+// Shared IPC deps — used by both file-based IPC watcher and stdout-relayed IPC (SSH mode)
+let ipcDeps: IpcDeps;
+
 function ensureContainerSystemRunning(): void {
-  ensureContainerRuntimeRunning();
-  cleanupOrphans();
+  // Docker mode: verify runtime and clean up orphans
+  // SSH mode: no Docker needed
+  if (detectRuntimeMode() === 'docker') {
+    ensureContainerRuntimeRunning();
+    cleanupOrphans();
+  }
 }
 
 async function main(): Promise<void> {
+  // Load SSH fleet config before runtime check (affects which runtime is used)
+  loadFleetConfig();
+  const runtimeMode = detectRuntimeMode();
+  logger.info({ runtimeMode }, 'Runtime mode detected');
+
   ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
   loadState();
 
+  // Start SSH fleet health checks if configured
+  if (runtimeMode === 'ssh') {
+    startHealthChecks();
+  }
+
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    stopHealthChecks();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
     process.exit(0);
@@ -564,6 +604,7 @@ async function main(): Promise<void> {
     writeGroupsSnapshot: (gf, im, ag, rj) =>
       writeGroupsSnapshot(gf, im, ag, rj),
   });
+  startIpcWatcher(ipcDeps);
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop().catch((err) => {

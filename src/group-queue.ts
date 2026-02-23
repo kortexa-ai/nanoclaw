@@ -14,6 +14,12 @@ interface QueuedTask {
 const MAX_RETRIES = 5;
 const BASE_RETRY_MS = 5000;
 
+/** Custom IPC handlers injected by the caller (e.g. SSH stdin-based IPC). */
+export interface IpcHandlers {
+  send: (text: string) => boolean;
+  close: () => void;
+}
+
 interface GroupState {
   active: boolean;
   idleWaiting: boolean;
@@ -25,6 +31,7 @@ interface GroupState {
   containerName: string | null;
   groupFolder: string | null;
   retryCount: number;
+  ipcHandlers: IpcHandlers | null;  // Custom IPC (null = default file-based IPC)
 }
 
 export class GroupQueue {
@@ -49,6 +56,7 @@ export class GroupQueue {
         containerName: null,
         groupFolder: null,
         retryCount: 0,
+        ipcHandlers: null,
       };
       this.groups.set(groupJid, state);
     }
@@ -139,6 +147,7 @@ export class GroupQueue {
     state.process = proc;
     state.containerName = containerName;
     if (groupFolder) state.groupFolder = groupFolder;
+    state.ipcHandlers = ipcHandlers || null;
   }
 
   /**
@@ -154,8 +163,9 @@ export class GroupQueue {
   }
 
   /**
-   * Send a follow-up message to the active container via IPC file.
-   * Returns true if the message was written, false if no active container.
+   * Send a follow-up message to the active agent.
+   * Uses stdin JSON lines (SSH/stdio mode) or IPC files (Docker mode).
+   * Returns true if the message was sent, false if no active agent.
    */
   sendMessage(groupJid: string, text: string): boolean {
     const state = this.getGroup(groupJid);
@@ -163,6 +173,11 @@ export class GroupQueue {
       return false;
     state.idleWaiting = false; // Agent is about to receive work, no longer idle
 
+    if (state.ipcHandlers) {
+      return state.ipcHandlers.send(text);
+    }
+
+    // Default: file-based IPC
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
       fs.mkdirSync(inputDir, { recursive: true });
@@ -178,12 +193,19 @@ export class GroupQueue {
   }
 
   /**
-   * Signal the active container to wind down by writing a close sentinel.
+   * Signal the active agent to wind down.
+   * Uses stdin JSON line (SSH/stdio mode) or _close sentinel file (Docker mode).
    */
   closeStdin(groupJid: string): void {
     const state = this.getGroup(groupJid);
     if (!state.active || !state.groupFolder) return;
 
+    if (state.ipcHandlers) {
+      state.ipcHandlers.close();
+      return;
+    }
+
+    // Default: file-based IPC — write _close sentinel
     const inputDir = path.join(DATA_DIR, 'ipc', state.groupFolder, 'input');
     try {
       fs.mkdirSync(inputDir, { recursive: true });

@@ -1,6 +1,6 @@
 /**
  * Container runtime abstraction for NanoClaw.
- * All runtime-specific logic lives here so swapping runtimes means changing one file.
+ * Docker container management — startup checks, orphan cleanup.
  */
 import { execSync } from 'child_process';
 

@@ -9,6 +9,7 @@ import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import { isValidGroupFolder } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
+import { IpcPayload } from './ipc-protocol.js';
 
 export interface IpcDeps {
   sendMessage: (jid: string, text: string) => Promise<void>;
@@ -385,5 +386,47 @@ export async function processTaskIpc(
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
+  }
+}
+
+/**
+ * Process an IPC payload received from stdout markers (SSH/stdio mode).
+ * Routes messages and tasks to the appropriate handler.
+ * This replaces file-based IPC polling for SSH-spawned agents.
+ */
+export async function processIpcPayload(
+  payload: IpcPayload,
+  sourceGroup: string,
+  isMain: boolean,
+  deps: IpcDeps,
+): Promise<void> {
+  if (payload.type === 'message') {
+    // Direct message sending
+    const chatJid = payload.chatJid as string;
+    const text = payload.text as string;
+    if (!chatJid || !text) {
+      logger.warn({ payload }, 'Invalid IPC message payload');
+      return;
+    }
+
+    const registeredGroups = deps.registeredGroups();
+    const targetGroup = registeredGroups[chatJid];
+    if (isMain || (targetGroup && targetGroup.folder === sourceGroup)) {
+      await deps.sendMessage(chatJid, text);
+      logger.info({ chatJid, sourceGroup }, 'IPC message sent (stdio relay)');
+    } else {
+      logger.warn(
+        { chatJid, sourceGroup },
+        'Unauthorized IPC message attempt blocked (stdio relay)',
+      );
+    }
+  } else {
+    // Task IPC — delegate to existing handler
+    await processTaskIpc(
+      payload as Parameters<typeof processTaskIpc>[0],
+      sourceGroup,
+      isMain,
+      deps,
+    );
   }
 }
