@@ -10,14 +10,12 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { FLEET_SSH_IDENTITY } from './config.js';
+import { FLEET_SSH_IDENTITY, SSH_FLEET_CONFIG_PATH } from './config.js';
 import { logger } from './logger.js';
 import {
   SshNode,
   SshFleetConfig,
   saveFleetConfig,
-  loadFleetConfig,
-  startHealthChecks,
   testSshConnection,
 } from './ssh-fleet.js';
 
@@ -319,16 +317,38 @@ export async function discoverAndProvisionFleet(): Promise<void> {
     return;
   }
 
-  // Save and activate fleet
+  // Merge with existing config on disk (preserves nodes that are
+  // temporarily unreachable during this scan)
+  const existingRaw = fs.existsSync(SSH_FLEET_CONFIG_PATH)
+    ? JSON.parse(fs.readFileSync(SSH_FLEET_CONFIG_PATH, 'utf-8')) as SshFleetConfig
+    : null;
+
+  const existingById = new Map<string, SshNode>();
+  if (existingRaw) {
+    for (const n of existingRaw.nodes) existingById.set(n.id, n);
+  }
+
+  const mergedNodes: SshNode[] = [];
+  const discoveredIds = new Set(nodes.map(n => n.id));
+
+  // Discovered nodes: update paths, preserve existing status
+  for (const node of nodes) {
+    const prev = existingById.get(node.id);
+    mergedNodes.push(prev ? { ...node, status: prev.status } : node);
+  }
+
+  // Keep existing nodes not in this scan (health checks manage their status)
+  for (const [id, node] of existingById) {
+    if (!discoveredIds.has(id)) mergedNodes.push(node);
+  }
+
   const fleetConfig: SshFleetConfig = {
-    nodes,
+    nodes: mergedNodes,
     meshSshKeyDistributed: true,
     defaultScheduling: 'least-loaded',
   };
 
   saveFleetConfig(fleetConfig);
-  loadFleetConfig();
-  startHealthChecks();
 
-  logger.info({ nodeCount: nodes.length }, 'Fleet auto-discovery complete, SSH runtime active');
+  logger.info({ nodeCount: mergedNodes.length }, 'Fleet auto-discovery complete');
 }

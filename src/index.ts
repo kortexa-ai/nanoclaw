@@ -4,6 +4,8 @@ import path from 'path';
 
 import {
   ASSISTANT_NAME,
+  DATA_DIR,
+  FLEET_REDISCOVERY_INTERVAL,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   STORE_DIR,
@@ -73,6 +75,35 @@ let messageLoopRunning = false;
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
+let discoveryWorkerRunning = false;
+let rediscoveryTimer: ReturnType<typeof setInterval> | null = null;
+
+function forkDiscoveryWorker(): void {
+  if (discoveryWorkerRunning) {
+    logger.debug('Discovery worker already running, skipping');
+    return;
+  }
+  discoveryWorkerRunning = true;
+
+  import('child_process').then(({ fork }) => {
+    const child = fork(
+      new URL('./ssh-discover-worker.js', import.meta.url).pathname,
+      [], { stdio: 'inherit' },
+    );
+    child.on('exit', (code) => {
+      discoveryWorkerRunning = false;
+      if (code === 0) {
+        loadFleetConfig();
+        if (detectRuntimeMode() === 'ssh') {
+          startHealthChecks();
+          logger.info('Fleet discovery complete, SSH runtime active');
+        }
+      } else {
+        logger.error({ code }, 'Fleet discovery worker exited with error');
+      }
+    });
+  });
+}
 
 function loadState(): void {
   lastTimestamp = getRouterState('last_timestamp') || '';
@@ -503,27 +534,22 @@ async function main(): Promise<void> {
       // Fleet candidates found in SSH config — skip Docker, start async discovery.
       // Runs in a child process to avoid blocking the event loop (probing uses execSync).
       logger.info({ candidates: fleetCandidates.length }, 'Fleet candidates in SSH config, starting auto-discovery');
-      import('child_process').then(({ fork }) => {
-        const child = fork(new URL('./ssh-discover-worker.js', import.meta.url).pathname, [], { stdio: 'inherit' });
-        child.on('exit', (code) => {
-          if (code === 0) {
-            // Reload fleet config after successful discovery
-            loadFleetConfig();
-            const newMode = detectRuntimeMode();
-            if (newMode === 'ssh') {
-              startHealthChecks();
-              logger.info('Fleet auto-discovery complete, switched to SSH runtime');
-            }
-          } else {
-            logger.error({ code }, 'Fleet auto-discovery worker exited with error');
-          }
-        });
-      });
+      forkDiscoveryWorker();
+      // Start periodic re-discovery
+      rediscoveryTimer = setInterval(() => {
+        logger.debug('Starting periodic fleet re-discovery');
+        forkDiscoveryWorker();
+      }, FLEET_REDISCOVERY_INTERVAL);
     } else {
       ensureContainerSystemRunning();  // Docker required (existing behavior)
     }
   } else {
     startHealthChecks();  // existing behavior
+    // Start periodic re-discovery for existing SSH fleet
+    rediscoveryTimer = setInterval(() => {
+      logger.debug('Starting periodic fleet re-discovery');
+      forkDiscoveryWorker();
+    }, FLEET_REDISCOVERY_INTERVAL);
   }
 
   initDatabase();
@@ -533,6 +559,7 @@ async function main(): Promise<void> {
   // Graceful shutdown handlers
   const shutdown = async (signal: string) => {
     logger.info({ signal }, 'Shutdown signal received');
+    if (rediscoveryTimer) clearInterval(rediscoveryTimer);
     stopHealthChecks();
     await queue.shutdown(10000);
     for (const ch of channels) await ch.disconnect();
