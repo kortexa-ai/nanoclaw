@@ -197,7 +197,7 @@ function provisionNode(candidate: ProbedCandidate, repoUrl: string, branch: stri
   }
 
   // Build agent-runner
-  const buildCmd = `cd ${repoDir}/ssh/agent-runner && npm install --production 2>&1 && npm run build 2>&1`;
+  const buildCmd = `cd ${repoDir}/ssh/agent-runner && npm install 2>&1 && npm run build 2>&1`;
   const buildResult = sshExec(alias, buildCmd, buildTimeout);
   if (buildResult === null) {
     logger.warn({ alias }, 'Provision: agent-runner build failed');
@@ -275,7 +275,7 @@ export async function discoverAndProvisionFleet(): Promise<void> {
     if (!fs.existsSync(agentRunnerPath)) {
       logger.info('Building agent-runner locally');
       try {
-        execSync('npm install --production && npm run build', {
+        execSync('npm install && npm run build', {
           cwd: path.join(repoDir, 'ssh', 'agent-runner'),
           stdio: 'pipe',
           timeout: 5 * 60 * 1000,
