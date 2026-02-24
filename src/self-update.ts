@@ -1,4 +1,7 @@
-import { execSync } from 'child_process';
+import { exec, execSync } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 export interface SelfUpdateResult {
   updated: boolean;
@@ -8,6 +11,7 @@ export interface SelfUpdateResult {
 }
 
 const EXEC_TIMEOUT = 120_000; // 2 minutes per command
+const FLEET_UPDATE_TIMEOUT = 180_000; // 3 minutes per node
 
 // Ensure node/npm binaries are on PATH (nvm sets this for the login shell
 // but execSync uses /bin/sh which may not inherit it)
@@ -60,10 +64,52 @@ export async function selfUpdate(): Promise<SelfUpdateResult> {
 
   log(`Self-update complete: ${localRev.slice(0, 7)} → ${remoteRev.slice(0, 7)}`);
 
+  // Propagate to fleet nodes (fire-and-forget — don't block restart)
+  propagateToFleet(branch);
+
   return {
     updated: true,
     oldRev: localRev,
     newRev: remoteRev,
     summary,
   };
+}
+
+/**
+ * Update fleet nodes asynchronously. Each node gets its own SSH call
+ * that fetches + resets + rebuilds. Failures are logged but don't
+ * block the orchestrator restart.
+ */
+function propagateToFleet(branch: string): void {
+  const fleetPath = path.resolve(process.cwd(), 'data', 'ssh-fleet.json');
+  if (!fs.existsSync(fleetPath)) return;
+
+  let config: { nodes: Array<{ id: string; host: string; user: string; port: number }> };
+  try {
+    config = JSON.parse(fs.readFileSync(fleetPath, 'utf-8'));
+  } catch {
+    log('Failed to read fleet config, skipping fleet propagation');
+    return;
+  }
+
+  const localHostname = os.hostname();
+  const sshOpts = '-o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -o BatchMode=yes';
+  const updateCmd = `cd ~/nanoclaw && git fetch origin && git reset --hard origin/${branch} && npm install --production=false 2>&1 && npm run build 2>&1 && cd ssh/agent-runner && npm install 2>&1 && npm run build 2>&1`;
+
+  for (const node of config.nodes) {
+    // Skip self — orchestrator is already updated
+    if (node.id === localHostname) continue;
+
+    const target = `${node.user}@${node.host}`;
+    const cmd = `ssh ${sshOpts} -p ${node.port} ${target} '${updateCmd}'`;
+
+    log(`Propagating update to ${node.id} (${target})`);
+    exec(cmd, { timeout: FLEET_UPDATE_TIMEOUT, env: { ...process.env, PATH: envPath } }, (err, stdout, stderr) => {
+      if (err) {
+        log(`Fleet update failed for ${node.id}: ${err.message}`);
+      } else {
+        log(`Fleet update complete for ${node.id}`);
+      }
+    });
+  }
 }
