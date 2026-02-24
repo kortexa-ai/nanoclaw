@@ -29,6 +29,8 @@ export interface SshNode {
   workspacePath: string;
   maxConcurrentAgents: number;
   status: 'online' | 'offline';
+  ip?: string;
+  gitRev?: string;
 }
 
 export interface SshFleetConfig {
@@ -112,7 +114,7 @@ export function testSshConnection(node: SshNode): boolean {
 export async function healthCheck(node: SshNode): Promise<boolean> {
   try {
     const result = execSync(
-      `ssh ${SSH_OPTIONS.join(' ')} -p ${node.port} ${sshTarget(node)} 'uptime && test -f ${node.agentRunnerPath} && echo agent-runner-ok'`,
+      `ssh ${SSH_OPTIONS.join(' ')} -p ${node.port} ${sshTarget(node)} 'uptime && test -f ${node.agentRunnerPath} && echo agent-runner-ok && hostname -I 2>/dev/null | awk "{print \\$1}" && cd ~/nanoclaw 2>/dev/null && git rev-parse --short HEAD 2>/dev/null'`,
       { stdio: 'pipe', timeout: (SSH_CONNECT_TIMEOUT + 10) * 1000, encoding: 'utf-8' },
     );
     const isHealthy = result.includes('agent-runner-ok');
@@ -120,6 +122,16 @@ export async function healthCheck(node: SshNode): Promise<boolean> {
       logger.info({ nodeId: node.id, host: node.host }, 'SSH node came back online');
     }
     node.status = isHealthy ? 'online' : 'offline';
+
+    // Parse IP and git rev from health check output
+    const lines = result.split('\n').map(l => l.trim()).filter(Boolean);
+    const okIdx = lines.indexOf('agent-runner-ok');
+    if (okIdx >= 0) {
+      // Lines after agent-runner-ok: IP, then git rev
+      if (lines[okIdx + 1]) node.ip = lines[okIdx + 1];
+      if (lines[okIdx + 2]) node.gitRev = lines[okIdx + 2];
+    }
+
     return isHealthy;
   } catch (err) {
     if (node.status !== 'offline') {

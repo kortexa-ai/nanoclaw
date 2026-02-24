@@ -1,4 +1,4 @@
-import { ChildProcess } from 'child_process';
+import { ChildProcess, execSync } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -778,6 +778,11 @@ async function main(): Promise<void> {
     fs.readFileSync(new URL('../package.json', import.meta.url), 'utf-8'),
   ).version as string;
 
+  let gitRev = 'unknown';
+  try {
+    gitRev = execSync('git rev-parse --short HEAD', { encoding: 'utf-8', timeout: 5000 }).trim();
+  } catch { /* non-git deployment */ }
+
   const publishStatusHeartbeat = () => {
     const fleet = getFleetConfig();
     mqtt.publishStatus({
@@ -787,6 +792,8 @@ async function main(): Promise<void> {
       uptime: Math.floor(process.uptime()),
       fleetNodes: fleet?.nodes.length ?? 0,
       activeAgents: queue.activeAgentCount,
+      gitRev,
+      assistantName: ASSISTANT_NAME,
       fleet: fleet?.nodes ?? [],
     });
   };
