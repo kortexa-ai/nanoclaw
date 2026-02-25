@@ -353,6 +353,27 @@ export function getMessagesSince(
     .all(chatJid, sinceTimestamp, `${botPrefix}:%`) as NewMessage[];
 }
 
+/**
+ * Get the most recent messages for a chat, ordered oldest-first.
+ */
+export function getRecentMessages(
+  chatJid: string,
+  limit: number,
+): Array<{ id: string; content: string; timestamp: string; is_from_me: number; sender_name: string }> {
+  const sql = `
+    SELECT id, content, timestamp, is_from_me, sender_name
+    FROM messages
+    WHERE chat_jid = ?
+      AND content != '' AND content IS NOT NULL
+    ORDER BY timestamp DESC
+    LIMIT ?
+  `;
+  const rows = db.prepare(sql).all(chatJid, limit) as Array<{
+    id: string; content: string; timestamp: string; is_from_me: number; sender_name: string;
+  }>;
+  return rows.reverse();
+}
+
 export function createTask(
   task: Omit<ScheduledTask, 'last_run' | 'last_result'>,
 ): void {

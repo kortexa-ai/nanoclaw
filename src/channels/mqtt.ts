@@ -7,6 +7,7 @@ import { createServer, Server } from 'net';
 import path from 'path';
 import { WebSocketServer, createWebSocketStream, type WebSocket } from 'ws';
 
+import { storeMessageDirect } from '../db.js';
 import { logger } from '../logger.js';
 import {
   Channel,
@@ -20,12 +21,14 @@ export interface MqttChannelOpts {
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
   onCommand?: (action: string) => void;
+  onHistoryRequest?: (limit: number) => void;
 }
 
 const TOPIC_IN = 'nanoclaw/in';
 const TOPIC_OUT = 'nanoclaw/out';
 const TOPIC_STATUS = 'nanoclaw/status';
 const TOPIC_CMD = 'nanoclaw/cmd';
+const TOPIC_HISTORY = 'nanoclaw/history';
 const JID = 'mqtt:local';
 
 export class MqttChannel implements Channel {
@@ -54,7 +57,9 @@ export class MqttChannel implements Channel {
       if (packet.topic === TOPIC_CMD) {
         try {
           const cmd = JSON.parse(packet.payload.toString('utf-8'));
-          if (cmd.action && this.opts.onCommand) {
+          if (cmd.action === 'get_history' && this.opts.onHistoryRequest) {
+            this.opts.onHistoryRequest(cmd.limit || 50);
+          } else if (cmd.action && this.opts.onCommand) {
             this.opts.onCommand(cmd.action);
           }
         } catch {
@@ -142,6 +147,17 @@ export class MqttChannel implements Channel {
       return;
     }
 
+    // Store bot response in DB so it appears in chat history
+    storeMessageDirect({
+      id: `mqtt-out-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      chat_jid: JID,
+      sender: 'assistant',
+      sender_name: 'Assistant',
+      content: text,
+      timestamp: new Date().toISOString(),
+      is_from_me: true,
+    });
+
     this.aedes.publish(
       {
         topic: TOPIC_OUT,
@@ -201,6 +217,21 @@ export class MqttChannel implements Channel {
 
   publishStatus(data: Record<string, unknown>): void {
     this.publishRetained(TOPIC_STATUS, JSON.stringify(data));
+  }
+
+  publishHistory(messages: Array<Record<string, unknown>>): void {
+    if (!this.aedes) return;
+    this.aedes.publish(
+      {
+        topic: TOPIC_HISTORY,
+        payload: Buffer.from(JSON.stringify(messages)),
+        qos: 0,
+        retain: false,
+        cmd: 'publish',
+        dup: false,
+      },
+      () => {},
+    );
   }
 
   private publishRetained(topic: string, payload: string): void {

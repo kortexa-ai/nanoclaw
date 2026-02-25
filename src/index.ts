@@ -42,6 +42,7 @@ import {
   setSession,
   storeChatMetadata,
   storeMessage,
+  getRecentMessages,
 } from './db.js';
 import { GroupQueue, IpcHandlers } from './group-queue.js';
 import { resolveGroupFolderPath } from './group-folder.js';
@@ -712,6 +713,17 @@ async function main(): Promise<void> {
       if (action === 'self_update') triggerSelfUpdate();
       else if (action === 'fleet_wipe') triggerFleetWipe();
       else logger.warn({ action }, 'Unknown command action');
+    },
+    onHistoryRequest: (limit: number) => {
+      const rows = getRecentMessages('mqtt:local', Math.min(limit, 200));
+      const messages = rows.map(r => ({
+        id: r.id,
+        content: r.content,
+        timestamp: r.timestamp,
+        direction: r.is_from_me ? 'received' : 'sent',
+        sender: r.sender_name,
+      }));
+      mqtt.publishHistory(messages);
     },
   };
 
