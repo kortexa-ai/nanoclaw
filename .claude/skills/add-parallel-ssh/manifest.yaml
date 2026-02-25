@@ -1,0 +1,16 @@
+skill: add-parallel-ssh
+version: 1.0.0
+description: "Parallel AI web research (Quick Search + Deep Research) for SSH fleet agents"
+core_version: 0.1.0
+adds: []
+modifies:
+  - src/container-runner.ts
+  - ssh/agent-runner/src/index.ts
+  - groups/main/CLAUDE.md
+structured:
+  env_additions:
+    - PARALLEL_API_KEY
+conflicts:
+  - add-parallel  # Use this skill instead of the Docker-based version
+depends:
+  - setup-pi-fleet

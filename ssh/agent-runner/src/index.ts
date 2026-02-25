@@ -292,6 +292,8 @@ async function runQuery(
     'TodoWrite', 'ToolSearch', 'Skill',
     'NotebookEdit',
     'mcp__nanoclaw__*',
+    'mcp__parallel-search__*',
+    'mcp__parallel-task__*',
   ];
   args.push('--allowedTools', allowedTools.join(','));
 
@@ -381,20 +383,36 @@ async function main(): Promise<void> {
   fs.mkdirSync(path.join(IPC_DIR, 'tasks'), { recursive: true });
 
   // Write MCP config to temp file (read by claude CLI)
-  const mcpConfig = JSON.stringify({
-    mcpServers: {
-      nanoclaw: {
-        command: 'node',
-        args: [mcpServerPath],
-        env: {
-          NANOCLAW_CHAT_JID: containerInput.chatJid,
-          NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
-          NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
-          NANOCLAW_IPC_DIR: IPC_DIR,
-        },
+  const mcpServers: Record<string, unknown> = {
+    nanoclaw: {
+      command: 'node',
+      args: [mcpServerPath],
+      env: {
+        NANOCLAW_CHAT_JID: containerInput.chatJid,
+        NANOCLAW_GROUP_FOLDER: containerInput.groupFolder,
+        NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
+        NANOCLAW_IPC_DIR: IPC_DIR,
       },
     },
-  });
+  };
+
+  // Add Parallel AI MCP servers if API key was passed via secrets
+  const parallelApiKey = containerInput.secrets?.PARALLEL_API_KEY;
+  if (parallelApiKey) {
+    mcpServers['parallel-search'] = {
+      type: 'http',
+      url: 'https://search-mcp.parallel.ai/mcp',
+      headers: { 'Authorization': `Bearer ${parallelApiKey}` },
+    };
+    mcpServers['parallel-task'] = {
+      type: 'http',
+      url: 'https://task-mcp.parallel.ai/mcp',
+      headers: { 'Authorization': `Bearer ${parallelApiKey}` },
+    };
+    log('Parallel AI MCP servers configured');
+  }
+
+  const mcpConfig = JSON.stringify({ mcpServers });
   const mcpConfigPath = path.join(IPC_DIR, 'mcp-config.json');
   fs.writeFileSync(mcpConfigPath, mcpConfig);
 
