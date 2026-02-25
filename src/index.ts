@@ -49,6 +49,7 @@ import { resolveGroupFolderPath } from './group-folder.js';
 import { IpcDeps, processIpcPayload, startIpcWatcher } from './ipc.js';
 import { IpcPayload } from './ipc-protocol.js';
 import {
+  getAgentCount,
   getFleetConfig,
   loadFleetConfig,
   selectNode,
@@ -804,16 +805,21 @@ async function main(): Promise<void> {
 
   const publishStatusHeartbeat = () => {
     const fleet = getFleetConfig();
+    const nodes = fleet?.nodes ?? [];
     mqtt.publishStatus({
       status: 'online',
       hostname: os.hostname(),
       version: pkgVersion,
       uptime: Math.floor(process.uptime()),
-      fleetNodes: fleet?.nodes.length ?? 0,
+      fleetNodes: nodes.length,
       activeAgents: queue.activeAgentCount,
       gitRev,
       assistantName: ASSISTANT_NAME,
-      fleet: fleet?.nodes ?? [],
+      fleet: nodes.map(n => ({
+        ...n,
+        activeAgents: getAgentCount(n.id),
+      })),
+      agents: queue.getActiveAgentSummaries(registeredGroups),
     });
   };
 

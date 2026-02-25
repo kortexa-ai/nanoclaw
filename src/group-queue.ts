@@ -46,6 +46,24 @@ export class GroupQueue {
     return this.activeCount;
   }
 
+  /** Return summaries of all currently active agents for status reporting. */
+  getActiveAgentSummaries(
+    registeredGroups: Record<string, { name: string; folder: string }>,
+  ): Array<{ group: string; groupFolder: string; isTask: boolean; idle: boolean }> {
+    const result: Array<{ group: string; groupFolder: string; isTask: boolean; idle: boolean }> = [];
+    for (const [jid, state] of this.groups) {
+      if (!state.active) continue;
+      const reg = registeredGroups[jid];
+      result.push({
+        group: reg?.name ?? jid,
+        groupFolder: state.groupFolder ?? reg?.folder ?? 'unknown',
+        isTask: state.isTaskContainer,
+        idle: state.idleWaiting,
+      });
+    }
+    return result;
+  }
+
   private getGroup(groupJid: string): GroupState {
     let state = this.groups.get(groupJid);
     if (!state) {
