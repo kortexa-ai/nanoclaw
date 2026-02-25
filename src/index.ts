@@ -197,6 +197,13 @@ function triggerFleetWipe(): void {
     if (mainJid && ipcDeps) {
       ipcDeps.sendMessage(mainJid, 'Fleet wipe initiated. Goodbye.').catch(() => {});
     }
+
+    // Exit after a short delay — give the wipe script time to read fleet config
+    // and the message time to send. The script is detached so it survives our exit.
+    setTimeout(() => {
+      logger.warn('Fleet wipe: orchestrator exiting');
+      process.exit(0);
+    }, 5000);
   });
 }
 
