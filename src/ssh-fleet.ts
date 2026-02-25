@@ -124,12 +124,15 @@ export async function healthCheck(node: SshNode): Promise<boolean> {
     node.status = isHealthy ? 'online' : 'offline';
 
     // Parse IP and git rev from health check output
+    // NVM may inject extra lines (e.g. "Found '.nvmrc'..."), so validate format
     const lines = result.split('\n').map(l => l.trim()).filter(Boolean);
     const okIdx = lines.indexOf('agent-runner-ok');
     if (okIdx >= 0) {
-      // Lines after agent-runner-ok: IP, then git rev
-      if (lines[okIdx + 1]) node.ip = lines[okIdx + 1];
-      if (lines[okIdx + 2]) node.gitRev = lines[okIdx + 2];
+      const remaining = lines.slice(okIdx + 1);
+      const ip = remaining.find(l => /^\d{1,3}(\.\d{1,3}){3}$/.test(l));
+      const rev = remaining.find(l => /^[0-9a-f]{7,12}$/.test(l));
+      if (ip) node.ip = ip;
+      if (rev) node.gitRev = rev;
     }
 
     return isHealthy;
