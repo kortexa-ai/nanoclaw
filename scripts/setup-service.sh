@@ -1,27 +1,34 @@
 #!/usr/bin/env bash
 #
 # Deploy nanoclaw to a Pi and set up as a systemd service.
-# Run from the dev machine: ./scripts/setup-service.sh [host]
+# Run from the dev machine: ./scripts/setup-service.sh [host] [branch] [assistant-name]
 #
 # Default host: 140 (moodymoose, the orchestrator)
+# Default branch: main
+# Assistant name: optional — if provided, creates .env with ASSISTANT_NAME
 #
 set -euo pipefail
 
 HOST="${1:-140}"
+BRANCH="${2:-main}"
+ASSISTANT_NAME="${3:-}"
 REPO_URL="https://github.com/kortexa-ai/nanoclaw.git"
 REMOTE_DIR="/home/pi/nanoclaw"
-BRANCH="${2:-main}"
 NODE_BIN="/home/pi/.nvm/versions/node/v25.0.0/bin"
 
 echo "==> Deploying nanoclaw to ${HOST} (branch: ${BRANCH})"
+if [[ -n "${ASSISTANT_NAME}" ]]; then
+  echo "    Assistant name: ${ASSISTANT_NAME}"
+fi
 
-ssh "${HOST}" bash -s "${REPO_URL}" "${REMOTE_DIR}" "${BRANCH}" "${NODE_BIN}" <<'REMOTE_SCRIPT'
+ssh "${HOST}" bash -s "${REPO_URL}" "${REMOTE_DIR}" "${BRANCH}" "${NODE_BIN}" "${ASSISTANT_NAME}" <<'REMOTE_SCRIPT'
 set -euo pipefail
 
 REPO_URL="$1"
 REMOTE_DIR="$2"
 BRANCH="$3"
 NODE_BIN="$4"
+ASSISTANT_NAME="${5:-}"
 export PATH="${NODE_BIN}:${PATH}"
 
 # --- Clone or pull ---
@@ -57,6 +64,17 @@ mkdir -p "${REMOTE_DIR}/logs"
 mkdir -p "${REMOTE_DIR}/store"
 mkdir -p "${REMOTE_DIR}/groups/main/logs"
 mkdir -p "${REMOTE_DIR}/data"
+
+# --- Configure assistant name ---
+if [[ -n "${ASSISTANT_NAME}" ]]; then
+  echo "==> Setting assistant name to: ${ASSISTANT_NAME}"
+  # Update or create .env, preserving other settings
+  if [[ -f "${REMOTE_DIR}/.env" ]]; then
+    # Remove existing ASSISTANT_NAME line if present
+    sed -i '/^ASSISTANT_NAME=/d' "${REMOTE_DIR}/.env"
+  fi
+  echo "ASSISTANT_NAME=${ASSISTANT_NAME}" >> "${REMOTE_DIR}/.env"
+fi
 
 # --- Systemd unit ---
 UNIT_FILE="/home/pi/.config/systemd/user/nanoclaw.service"
