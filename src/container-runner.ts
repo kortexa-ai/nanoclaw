@@ -50,6 +50,7 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  timedOut?: 'idle' | 'wall-clock';
 }
 
 interface VolumeMount {

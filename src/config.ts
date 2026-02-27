@@ -68,6 +68,11 @@ export const SSH_FLEET_CONFIG_PATH = path.resolve(DATA_DIR, 'ssh-fleet.json');
 export const FLEET_SSH_IDENTITY = process.env.FLEET_SSH_IDENTITY || 'id_pi_cluster';
 export const FLEET_REDISCOVERY_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
+// Wall-clock hard cap — kills agent regardless of activity (non-resetting)
+export const WALL_CLOCK_TIMEOUT = parseInt(
+  process.env.WALL_CLOCK_TIMEOUT || '14400000', 10,
+); // 4h default
+
 // Self-update check interval
 export const UPDATE_CHECK_INTERVAL = 30 * 60 * 1000; // 30 minutes
 

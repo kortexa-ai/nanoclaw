@@ -46,6 +46,11 @@ export class GroupQueue {
     return this.activeCount;
   }
 
+  isActive(groupJid: string): boolean {
+    const state = this.groups.get(groupJid);
+    return state?.active ?? false;
+  }
+
   /** Return summaries of all currently active agents for status reporting. */
   getActiveAgentSummaries(
     registeredGroups: Record<string, { name: string; folder: string }>,

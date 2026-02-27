@@ -13,6 +13,7 @@ import {
   CONTAINER_TIMEOUT,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  WALL_CLOCK_TIMEOUT,
 } from './config.js';
 import { logger } from './logger.js';
 import {
@@ -55,6 +56,7 @@ function handleSshAgentProcess(
   let stdoutTruncated = false;
   let stderrTruncated = false;
   let timedOut = false;
+  let wallClockTimedOut = false;
   let hadStreamingOutput = false;
   let newSessionId: string | undefined;
   let outputChain = Promise.resolve();
@@ -75,6 +77,17 @@ function handleSshAgentProcess(
   };
 
   let timeout = setTimeout(killOnTimeout, timeoutMs);
+
+  // Wall-clock hard cap — never resets, kills regardless of activity
+  const wallClockTimer = setTimeout(() => {
+    timedOut = true;
+    wallClockTimedOut = true;
+    logger.warn({ group: group.name, containerName }, 'Wall-clock timeout reached, killing agent');
+    proc.kill('SIGTERM');
+    setTimeout(() => {
+      if (!proc.killed) proc.kill('SIGKILL');
+    }, 15000);
+  }, WALL_CLOCK_TIMEOUT);
 
   // Reset the timeout whenever there's activity (streaming output)
   const resetTimeout = () => {
@@ -149,13 +162,15 @@ function handleSshAgentProcess(
 
   proc.on('close', (code) => {
     clearTimeout(timeout);
+    clearTimeout(wallClockTimer);
     const duration = Date.now() - startTime;
+    const timeoutKind: 'idle' | 'wall-clock' | undefined = wallClockTimedOut ? 'wall-clock' : timedOut ? 'idle' : undefined;
 
     if (timedOut) {
       const ts = new Date().toISOString().replace(/[:.]/g, '-');
       const timeoutLog = path.join(logsDir, `container-${ts}.log`);
       fs.writeFileSync(timeoutLog, [
-        `=== Agent Run Log (TIMEOUT) ===`,
+        `=== Agent Run Log (TIMEOUT${wallClockTimedOut ? ' - WALL CLOCK' : ''}) ===`,
         `Timestamp: ${new Date().toISOString()}`,
         `Group: ${group.name}`,
         `Agent: ${containerName}`,
@@ -163,9 +178,28 @@ function handleSshAgentProcess(
         `Duration: ${duration}ms`,
         `Exit Code: ${code}`,
         `Had Streaming Output: ${hadStreamingOutput}`,
+        `Timeout Kind: ${timeoutKind}`,
       ].join('\n'));
 
-      // Timeout after output = idle cleanup, not failure.
+      // Wall-clock timeout always reports the kind so index.ts can clear the session
+      if (wallClockTimedOut) {
+        logger.warn(
+          { group: group.name, containerName, duration, code },
+          'SSH agent hit wall-clock timeout',
+        );
+        Promise.all([outputChain, ipcChain]).then(() => {
+          resolve({
+            status: hadStreamingOutput ? 'success' : 'error',
+            result: null,
+            newSessionId,
+            timedOut: 'wall-clock',
+            error: hadStreamingOutput ? undefined : `Agent hit wall-clock timeout after ${WALL_CLOCK_TIMEOUT}ms`,
+          });
+        });
+        return;
+      }
+
+      // Idle timeout after output = idle cleanup, not failure.
       if (hadStreamingOutput) {
         logger.info(
           { group: group.name, containerName, duration, code },
@@ -176,6 +210,7 @@ function handleSshAgentProcess(
             status: 'success',
             result: null,
             newSessionId,
+            timedOut: 'idle',
           });
         });
         return;
@@ -190,6 +225,7 @@ function handleSshAgentProcess(
         status: 'error',
         result: null,
         error: `Agent timed out after ${configTimeout}ms`,
+        timedOut: 'idle',
       });
       return;
     }

@@ -12,7 +12,7 @@
     <key>WorkingDirectory</key>
     <string>{{PROJECT_ROOT}}</string>
     <key>RunAtLoad</key>
-    <true/>
+    <false/>
     <key>KeepAlive</key>
     <true/>
     <key>EnvironmentVariables</key>

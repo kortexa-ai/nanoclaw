@@ -228,6 +228,16 @@ export function getAgentCount(nodeId: string): number {
   return activeAgentCounts.get(nodeId) || 0;
 }
 
+/** Check if any online node has capacity for another agent. */
+export function hasFleetCapacity(): boolean {
+  if (!config) return false;
+  return config.nodes.some(n => {
+    if (n.status !== 'online') return false;
+    const count = activeAgentCounts.get(n.id) || 0;
+    return count < n.maxConcurrentAgents;
+  });
+}
+
 // --- Group directory sync ---
 
 /**

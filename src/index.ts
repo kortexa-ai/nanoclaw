@@ -40,6 +40,7 @@ import {
   setRegisteredGroup,
   setRouterState,
   setSession,
+  deleteSession,
   storeChatMetadata,
   storeMessage,
   getRecentMessages,
@@ -475,7 +476,12 @@ async function runAgent(
       wrappedOnOutput,
     );
 
-    if (output.newSessionId) {
+    // Wall-clock timeout: nuke session so next agent starts fresh
+    if (output.timedOut === 'wall-clock') {
+      logger.warn({ group: group.name }, 'Wall-clock timeout — clearing session for fresh start');
+      delete sessions[group.folder];
+      deleteSession(group.folder);
+    } else if (output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
     }
@@ -584,7 +590,7 @@ async function startMessageLoop(): Promise<void> {
                 logger.warn({ chatJid, err }, 'Failed to set typing indicator'),
               );
           } else {
-            // No active container — enqueue for a new one
+            // No active container or can't pipe — enqueue for a new one
             queue.enqueueMessageCheck(chatJid);
           }
         }
