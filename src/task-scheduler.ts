@@ -77,6 +77,21 @@ export interface SchedulerDependencies {
   ipcDeps?: IpcDeps;
 }
 
+/** Compute the next run time for a task (without side effects). */
+function computeNextRun(task: ScheduledTask): string | null {
+  if (task.schedule_type === 'cron') {
+    const interval = CronExpressionParser.parse(task.schedule_value, {
+      tz: TIMEZONE,
+    });
+    return interval.next().toISOString();
+  } else if (task.schedule_type === 'interval') {
+    const ms = parseInt(task.schedule_value, 10);
+    return new Date(Date.now() + ms).toISOString();
+  }
+  // 'once' tasks have no next run
+  return null;
+}
+
 /** Dispatcher — routes to container or SSH task runner based on runtime mode. */
 async function runTask(
   task: ScheduledTask,
